@@ -42,6 +42,7 @@ SIZEOF_COND_T = 48
 SIZEOF_MUTEXATTR_T = 4
 
 PTHREAD_MUTEX_RECURSIVE = 1
+PTHREAD_MUTEX_ERRORCHECK = 2
 
 MUTEX_T = C.c_char * SIZEOF_MUTEX_T
 COND_T = C.c_char * SIZEOF_COND_T
@@ -66,7 +67,11 @@ class mutexattr_t(C.Union):
 class Mutex(object):
     __slots__ = ("_mutex")
 
+    def isRecursive(self):
+        return self.__isRecursive
+
     def __init__(self, recursive=False):
+        self.__isRecursive = recursive
         self._mutex = MUTEX_T()
 
         if recursive:
@@ -75,7 +80,10 @@ class Mutex(object):
             _libpthread.pthread_mutexattr_settype(
                 attr, C.c_int(PTHREAD_MUTEX_RECURSIVE))
         else:
-            attr = None
+            attr = C.byref(mutexattr_t())
+            _libpthread.pthread_mutexattr_init(attr)
+            _libpthread.pthread_mutexattr_settype(
+                attr, C.c_int(PTHREAD_MUTEX_ERRORCHECK))
 
         res = _libpthread.pthread_mutex_init(self._mutex, attr)
 
@@ -94,6 +102,9 @@ class Mutex(object):
 
     def lock(self):
         return _libpthread.pthread_mutex_lock(self._mutex)
+
+    def timedlock(self, abstime):
+        return _libpthread.pthread_mutex_timedlock(self._mutex, abstime)
 
     def unlock(self):
         return _libpthread.pthread_mutex_unlock(self._mutex)

@@ -120,32 +120,52 @@ class Condition(object):
     def __exit__(self, *args):
         return self.__lock.__exit__(*args)
 
+    def _isSpuriousWakeup(self):
+        """
+        Test to see if this is a spurious wakeup
+        """
+        if self.__lock.isRecursive():
+            # There is no reliable way to check for spurious wake-ups when
+            # using a condition with a recursive lock Since using an RLock with
+            # a condition is dangerous as it is those who do so should need to
+            # handle that situation themselves anyway.
+            return False
+
+        bailout = time.time()
+        abstime = pthread.timespec()
+        abstime.tv_sec = int(bailout)
+        abstime.tv_nsec = int((bailout - int(bailout)) * (10 ** 9))
+        res = self.__lock.timedlock(abstime)
+        if res == errno.EDEADLK:
+            # We already own the lock
+            return False
+
+        if res == 0:
+            self.__lock.release()
+
+        return True
+
     def wait(self, timeout=None, balancing=True):
         # Balancing is an undocumented argument for Condition.wait()
-        # It is relevent in python because it busy loops. Since the whole
+        # It is relevant in python because it busy loops. Since the whole
         # purpose of this package is to not busy loop we just silently ignore
         # this argument.
         if timeout is not None:
             bailout = time.time() + timeout
-            self.wait_until(bailout)
-        else:
-            self.__cond.wait()
+            abstime = pthread.timespec()
+            abstime.tv_sec = int(bailout)
+            abstime.tv_nsec = int((bailout - int(bailout)) * (10 ** 9))
 
-    def wait_until(self, bailout):
-        """
-        Waits until bailout time has passed or the condtion is notified.
+        isSpuriousWakeup = True
+        while isSpuriousWakeup:
+            if timeout is not None:
+                res = self.__cond.timedwait(abstime)
+                if res == errno.ETIMEDOUT:
+                    return
+            else:
+                self.__cond.wait()
 
-        This may return before bailout time if notify() or notify_all() were
-        invoked, or because of spurious wakeup of the underlying
-        implementation. You must check the return value to detect if bailout
-        time has passed.
-
-        Return True if bailout timeout has passed, False otherwise.
-        """
-        abstime = pthread.timespec()
-        abstime.tv_sec = int(bailout)
-        abstime.tv_nsec = int((bailout - int(bailout)) * (10 ** 9))
-        return self.__cond.timedwait(abstime) == errno.ETIMEDOUT
+            isSpuriousWakeup = self._isSpuriousWakeup()
 
     def notify(self):
         return self.__cond.signal()
@@ -209,16 +229,9 @@ class Event(object):
         True except if a timeout is given and the operation times out.
 
         """
-        # Compute the bailout before taking the lock, since taking the lock may
-        # block, enlarging the requested timeout.
-        if timeout is not None:
-            bailout = time.time() + timeout
-
         with self.__cond:
             if timeout is not None:
-                while not self.__flag:
-                    if self.__cond.wait_until(bailout):
-                        break  # Timeout expired
+                self.__cond.wait(timeout)
             else:
                 while not self.__flag:
                     self.__cond.wait()
