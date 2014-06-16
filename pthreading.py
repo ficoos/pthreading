@@ -68,8 +68,11 @@ class _Lock(pthread.Mutex):
     def __exit__(self, exc_type, exc_value, traceback):
         self.release()
 
-    def acquire(self, blocking=True):
+    @property
+    def owner(self):
+        return self.__owner
 
+    def acquire(self, blocking=True):
         rc = self.lock() if blocking else self.trylock()
 
         if rc == 0:
@@ -184,8 +187,8 @@ class Event(object):
     def clear(self):
         """Reset the internal flag to false.
 
-        Subsequently, threads calling wait() will block until set() is called to
-        set the internal flag to true again.
+        Subsequently, threads calling wait() will block until set() is called
+        to set the internal flag to true again.
 
         """
         with self.__cond:
@@ -195,8 +198,8 @@ class Event(object):
         """Block until the internal flag is true.
 
         If the internal flag is true on entry, return immediately. Otherwise,
-        block until another thread calls set() to set the flag to true, or until
-        the optional timeout occurs.
+        block until another thread calls set() to set the flag to true, or
+        until the optional timeout occurs.
 
         When the timeout argument is present and not None, it should be a
         floating point number specifying a timeout for the operation in seconds
@@ -215,7 +218,7 @@ class Event(object):
             if timeout is not None:
                 while not self.__flag:
                     if self.__cond.wait_until(bailout):
-                        break # Timeout expired
+                        break  # Timeout expired
             else:
                 while not self.__flag:
                     self.__cond.wait()
